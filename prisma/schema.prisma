@@ -1,0 +1,117 @@
+// ═══════════════════════════════════════════════════════════════════
+// ⚡ IGNITION - PRISMA SCHEMA
+// ═══════════════════════════════════════════════════════════════════
+// Database schema for the Ignition Token Launch Engine
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────
+
+/// Status of a token launch
+enum LaunchStatus {
+  pending     // Detected, waiting to process
+  processing  // Currently being launched
+  launched    // Successfully launched on pump.fun
+  failed      // Launch failed, can be retried
+  skipped     // Manually skipped (backfill)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Models
+// ─────────────────────────────────────────────────────────────────────
+
+/// Represents a follower detected from the target X account
+model Follower {
+  id            String        @id @default(uuid())
+  
+  // Twitter/X profile info
+  username      String        @unique
+  displayName   String?       @map("display_name")
+  profileUrl    String?       @map("profile_url")
+  avatarUrl     String?       @map("avatar_url")
+  twitterId     String?       @unique @map("twitter_id")
+  
+  // Detection info
+  detectedAt    DateTime      @default(now()) @map("detected_at")
+  
+  // Launch status
+  status        LaunchStatus  @default(pending)
+  launchedAt    DateTime?     @map("launched_at")
+  
+  // Token info (populated after successful launch)
+  tokenAddress  String?       @map("token_address")
+  tokenName     String?       @map("token_name")
+  tokenSymbol   String?       @map("token_symbol")
+  metadataUri   String?       @map("metadata_uri")
+  
+  // Transaction info
+  txSignature   String?       @map("tx_signature")
+  pumpUrl       String?       @map("pump_url")
+  
+  // Error handling
+  errorMessage  String?       @map("error_message")
+  retryCount    Int           @default(0) @map("retry_count")
+  lastRetryAt   DateTime?     @map("last_retry_at")
+  
+  // Timestamps
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  
+  // Relations
+  logs          LaunchLog[]
+  
+  @@map("followers")
+  @@index([status])
+  @@index([detectedAt])
+  @@index([launchedAt])
+  @@index([tokenAddress])
+}
+
+/// Audit log for launch operations
+model LaunchLog {
+  id          String    @id @default(uuid())
+  
+  // Reference to follower
+  followerId  String    @map("follower_id")
+  follower    Follower  @relation(fields: [followerId], references: [id], onDelete: Cascade)
+  
+  // Log details
+  action      String    // DETECTED, LAUNCH_STARTED, IPFS_UPLOADED, TX_SUBMITTED, LAUNCH_SUCCESS, LAUNCH_FAILED, RETRY_SCHEDULED
+  details     Json?     // Additional context
+  
+  // Timestamp
+  createdAt   DateTime  @default(now()) @map("created_at")
+  
+  @@map("launch_logs")
+  @@index([followerId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+/// System configuration and state
+model SystemState {
+  id            String    @id @default("singleton")
+  
+  // Polling state
+  lastPollAt    DateTime? @map("last_poll_at")
+  lastCursor    String?   @map("last_cursor")
+  
+  // Statistics
+  totalLaunches Int       @default(0) @map("total_launches")
+  totalFailed   Int       @default(0) @map("total_failed")
+  
+  // Timestamps
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  
+  @@map("system_state")
+}
